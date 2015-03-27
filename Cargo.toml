@@ -3,4 +3,6 @@ name = "pocket-resources"
 version = "0.1.0"
 authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 description = "Include resources in your applications."
-
+keywords = ["resources"]
+license = "MIT"
+repository = "https://github.com/tomaka/pocket-resources"
