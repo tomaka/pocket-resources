@@ -1,0 +1,13 @@
+language: rust
+
+sudo: true
+
+script:
+    - cargo test -v --manifest-path Cargo.toml
+    - cargo run -v --manifest-path demo/Cargo.toml
+
+after_success:
+    - |
+        [ $TRAVIS_BRANCH = master ] &&
+        [ $TRAVIS_PULL_REQUEST = false ] &&
+        cargo publish --token ${CRATESIO_TOKEN}
