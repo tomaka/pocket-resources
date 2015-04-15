@@ -1,4 +1,4 @@
-#![feature(collections, convert, path_ext, path_relative_from)]
+#![feature(collections, path_ext, path_relative_from)]
 
 use std::env;
 use std::io;
@@ -12,7 +12,7 @@ use std::slice::SliceConcatExt;
 
 pub fn package<I>(directories: I) -> io::Result<()> where I: IntoIterator, I::Item: AsRef<Path> {
     let mut enum_output = format!(r#"
-        #[derive(Copy)]
+        #[derive(Copy, Clone)]
         pub enum Resource {{
             "#);
 
