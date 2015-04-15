@@ -12,7 +12,7 @@ use std::slice::SliceConcatExt;
 
 pub fn package<I>(directories: I) -> io::Result<()> where I: IntoIterator, I::Item: AsRef<Path> {
     let mut enum_output = format!(r#"
-        #[derive(Copy, Clone)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
         pub enum Resource {{
             "#);
 
