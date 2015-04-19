@@ -10,7 +10,9 @@ use std::iter::IntoIterator;
 use std::path::{Component, Path};
 use std::slice::SliceConcatExt;
 
-pub fn package<I>(directories: I) -> io::Result<()> where I: IntoIterator, I::Item: AsRef<Path> {
+pub fn package<I>(directories: I, remove_extensions: bool) -> io::Result<()>
+                  where I: IntoIterator, I::Item: AsRef<Path>
+{
     let mut enum_output = format!(r#"
         #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
         pub enum Resource {{
@@ -24,8 +26,8 @@ pub fn package<I>(directories: I) -> io::Result<()> where I: IntoIterator, I::It
             let original_entry = original_entry.path();
             let entry = original_entry.relative_from(&directory).unwrap();
 
-            let res_name = path_to_resource_name(entry);
-            let enum_variant = path_to_enum_variant(entry);
+            let res_name = path_to_resource_name(entry, remove_extensions);
+            let enum_variant = path_to_enum_variant(entry, remove_extensions);
 
             enum_output.push_str(&format!(r#"
                 /// {}
@@ -90,31 +92,44 @@ fn visit_dirs<P, C>(dir: P, mut cb: &mut C) -> io::Result<()>
 }
 
 /// Turns a path into a variant name for the enumeration of resources.
-fn path_to_enum_variant<P>(path: P) -> String where P: AsRef<Path> {
+fn path_to_enum_variant<P>(path: P, remove_extensions: bool) -> String where P: AsRef<Path> {
     let path = path.as_ref();
 
-    let components = path.iter().map(|val| {
-        let val = val.to_str().expect("Cannot process non-UTF8 path");
-        let val = val.chars().filter(|c| c.is_alphanumeric()).collect::<String>();
-        format!("{}{}", val[..1].to_uppercase(), val[1..].to_lowercase())
-    }).collect::<Vec<_>>();
+    let components = path.parent().into_iter().flat_map(|p| p.iter())
+                         .chain(if remove_extensions {
+                             path.file_stem().into_iter()
+                         } else {
+                             path.file_name().into_iter()
+                         })
+                         .map(|val| {
+                             let val = val.to_str().expect("Cannot process non-UTF8 path");
+                             let val = val.chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+                             format!("{}{}", val[..1].to_uppercase(), val[1..].to_lowercase())
+                         }).collect::<Vec<_>>();
 
     components.concat()
 }
 
 /// Turns a path into a resource name usable by the program.
-fn path_to_resource_name<P>(path: P) -> String where P: AsRef<Path> {
+fn path_to_resource_name<P>(path: P, remove_extensions: bool) -> String where P: AsRef<Path> {
     let path = path.as_ref();
 
-    let components = path.components().map(|component| {
-        match component {
-            Component::Prefix(_) => unreachable!(),
-            Component::RootDir => unreachable!(),
-            Component::CurDir => unreachable!(),
-            Component::ParentDir => unreachable!(),
-            Component::Normal(s) => s.to_str().expect("Cannot process non-UTF8 path"),
-        }
-    }).collect::<Vec<_>>();
-
-    components.connect("/")
+    path.parent()
+        .into_iter()
+        .flat_map(|p| p.components().map(|component| {
+            match component {
+                Component::Prefix(_) => unreachable!(),
+                Component::RootDir => unreachable!(),
+                Component::CurDir => unreachable!(),
+                Component::ParentDir => unreachable!(),
+                Component::Normal(s) => s.to_str().expect("Cannot process non-UTF8 path"),
+            }
+        }))
+        .chain(if remove_extensions {
+            path.file_stem().map(|v| v.to_str().unwrap()).into_iter()
+        } else {
+            path.file_name().map(|v| v.to_str().unwrap()).into_iter()
+        })
+        .collect::<Vec<_>>()
+        .connect("/")
 }
