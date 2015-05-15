@@ -1,14 +1,11 @@
-#![feature(collections, path_ext, path_relative_from)]
-
+use std::ascii::AsciiExt;
 use std::env;
 use std::io;
 use std::io::Write;
 use std::fs;
 use std::fs::File;
-use std::fs::PathExt;
 use std::iter::IntoIterator;
 use std::path::{Component, Path};
-use std::slice::SliceConcatExt;
 
 pub fn package<I>(directories: I, remove_extensions: bool) -> io::Result<()>
                   where I: IntoIterator, I::Item: AsRef<Path>
@@ -24,7 +21,7 @@ pub fn package<I>(directories: I, remove_extensions: bool) -> io::Result<()>
     for directory in directories.into_iter() {
         try!(visit_dirs(&directory, &mut |original_entry| {
             let original_entry = original_entry.path();
-            let entry = original_entry.relative_from(&directory).unwrap();
+            let entry = relative_from(&original_entry, &directory).unwrap();
 
             let res_name = path_to_resource_name(entry, remove_extensions);
             let enum_variant = path_to_enum_variant(entry, remove_extensions);
@@ -77,10 +74,10 @@ fn visit_dirs<P, C>(dir: P, mut cb: &mut C) -> io::Result<()>
 {
     let dir = dir.as_ref();
 
-    if dir.is_dir() {
+    if try!(fs::metadata(dir)).is_dir() {
         for entry in try!(fs::read_dir(dir)) {
             let entry = try!(entry);
-            if entry.path().is_dir() {
+            if try!(fs::metadata(entry.path())).is_dir() {
                 try!(visit_dirs(&entry.path(), cb));
             } else {
                 cb(entry);
@@ -104,7 +101,7 @@ fn path_to_enum_variant<P>(path: P, remove_extensions: bool) -> String where P: 
                          .map(|val| {
                              let val = val.to_str().expect("Cannot process non-UTF8 path");
                              let val = val.chars().filter(|c| c.is_alphanumeric()).collect::<String>();
-                             format!("{}{}", val[..1].to_uppercase(), val[1..].to_lowercase())
+                             format!("{}{}", val[..1].to_ascii_uppercase(), val[1..].to_ascii_lowercase())
                          }).collect::<Vec<_>>();
 
     components.concat()
@@ -132,4 +129,26 @@ fn path_to_resource_name<P>(path: P, remove_extensions: bool) -> String where P:
         })
         .collect::<Vec<_>>()
         .connect("/")
+}
+
+pub fn relative_from<'a, P: ?Sized + AsRef<Path>>(path: &'a Path, base: &'a P) -> Option<&'a Path>
+{
+    fn iter_after<A, I, J>(mut iter: I, mut prefix: J) -> Option<I> where
+        I: Iterator<Item=A> + Clone, J: Iterator<Item=A>, A: PartialEq
+    {
+        loop {
+            let mut iter_next = iter.clone();
+            match (iter_next.next(), prefix.next()) {
+                (Some(x), Some(y)) => {
+                    if x != y { return None }
+                }
+                (Some(_), None) => return Some(iter),
+                (None, None) => return Some(iter),
+                (None, Some(_)) => return None,
+            }
+            iter = iter_next;
+        }
+    }
+
+    iter_after(path.components(), base.as_ref().components()).map(|c| c.as_path())
 }
