@@ -2,10 +2,9 @@ use std::ascii::AsciiExt;
 use std::env;
 use std::io;
 use std::io::Write;
-use std::fs;
 use std::fs::File;
 use std::iter::IntoIterator;
-use std::path::{Component, Path};
+use std::path::Path;
 use std::collections::HashSet;
 
 #[derive(Debug)]
@@ -20,7 +19,7 @@ struct Entry {
 }
 
 pub fn package<'a, I, P1, P2>(files: I) -> io::Result<()>
-    where I: IntoIterator<Item = &'a (P1, P2)>, P1: AsRef<Path>, P2: AsRef<Path>
+    where I: IntoIterator<Item = &'a (P1, P2)>, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a
 {
     let entries = files.into_iter().map(|&(ref base_dir, ref file)| {
         let base_dir = base_dir.as_ref();
@@ -155,28 +154,4 @@ fn path_to_enum_variant<P>(path: P) -> String where P: AsRef<Path> {
                          }).collect::<Vec<_>>();
 
     components.concat()
-}
-
-/// Turns a path into a resource name usable by the program.
-fn path_to_resource_name<P>(path: P, remove_extensions: bool) -> String where P: AsRef<Path> {
-    let path = path.as_ref();
-
-    path.parent()
-        .into_iter()
-        .flat_map(|p| p.components().map(|component| {
-            match component {
-                Component::Prefix(_) => unreachable!(),
-                Component::RootDir => unreachable!(),
-                Component::CurDir => unreachable!(),
-                Component::ParentDir => unreachable!(),
-                Component::Normal(s) => s.to_str().expect("Cannot process non-UTF8 path"),
-            }
-        }))
-        .chain(if remove_extensions {
-            path.file_stem().map(|v| v.to_str().unwrap()).into_iter()
-        } else {
-            path.file_name().map(|v| v.to_str().unwrap()).into_iter()
-        })
-        .collect::<Vec<_>>()
-        .connect("/")
 }
