@@ -59,6 +59,7 @@ pub fn package<'a, I, P1, P2>(files: I) -> io::Result<()>
     let file_path = Path::new(&file_path).join("pocket-resources.rs");
     let mut file = File::create(&file_path).unwrap();
 
+    try!(writeln!(file, r#"#[derive(Debug, Clone, Hash, PartialEq, Eq)]"#));
     try!(writeln!(file, r#"pub enum ResourceId {{"#));
     for entry in &entries { try!(writeln!(file, r"{},", entry.enum_name)); }
     try!(writeln!(file, r#"}}"#));
