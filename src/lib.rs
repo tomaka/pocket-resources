@@ -45,7 +45,11 @@ pub fn package<'a, I, P1, P2>(files: I) -> io::Result<()>
                 val.to_ascii_uppercase()
             },
             resource_str_name: file.display().to_string(),
-            resource_str_name_no_ext: file.file_stem().unwrap().to_os_string().into_string().unwrap(),
+            resource_str_name_no_ext: if file.iter().count() == 1 {
+                file.file_stem().unwrap().to_os_string().into_string().unwrap()
+            } else {
+                file.parent().unwrap().display().to_string() + "/" + &file.file_stem().unwrap().to_os_string().into_string().unwrap()
+            },
             file_path: base_dir.join(file).display().to_string(),
             enum_name: path_to_enum_variant(file),
         }
