@@ -2,102 +2,155 @@ use std::ascii::AsciiExt;
 use std::env;
 use std::io;
 use std::io::Write;
-use std::fs;
 use std::fs::File;
 use std::iter::IntoIterator;
-use std::path::{Component, Path};
+use std::path::Path;
+use std::collections::HashSet;
 
-pub fn package<I>(directories: I, remove_extensions: bool) -> io::Result<()>
-                  where I: IntoIterator, I::Item: AsRef<Path>
+#[derive(Debug)]
+struct Entry {
+    path: Vec<String>,
+    struct_name: String,
+    struct_name_no_ext: String,
+    resource_str_name: String,
+    resource_str_name_no_ext: String,
+    file_path: String,
+    enum_name: String,
+}
+
+pub fn package<'a, I, P1, P2>(files: I) -> io::Result<()>
+    where I: IntoIterator<Item = &'a (P1, P2)>, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a
 {
-    let mut enum_output = format!(r#"
-        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-        pub enum Resource {{
-            "#);
+    let entries = files.into_iter().map(|&(ref base_dir, ref file)| {
+        let base_dir = base_dir.as_ref();
+        let file = file.as_ref();
 
-    let mut if_clause = format!("");
-    let mut load_clause = format!("");
+        println!("cargo:rerun-if-changed={}/{}", base_dir.display(), file.display());
 
-    for directory in directories.into_iter() {
-        try!(visit_dirs(&directory, &mut |original_entry| {
-            let original_entry = original_entry.path();
-            let entry = relative_from(&original_entry, &directory).unwrap();
-
-            let res_name = path_to_resource_name(entry, remove_extensions);
-            let enum_variant = path_to_enum_variant(entry, remove_extensions);
-
-            enum_output.push_str(&format!(r#"
-                /// {}
-                {},
-            "#, res_name, enum_variant));
-
-            if_clause.push_str(&format!(r##"
-                if name == r#"{}"# {{
-                    Some(Resource::{})
-                }} else 
-            "##, res_name, enum_variant));
-
-            load_clause.push_str(&format!(r##"
-                &Resource::{} => include_bytes!(r#"{}"#),
-            "##, enum_variant, env::current_dir().unwrap().join(&original_entry).display()));
-        }));
-    }
-
-    enum_output.push_str("}");
+        Entry {
+            path: file.parent().into_iter().flat_map(|p| p.iter()).map(|val| {
+                let val = val.to_str().expect("Cannot process non-UTF8 path");
+                val.chars().filter(|c| c.is_alphanumeric()).collect::<String>()
+            }).collect(),
+            struct_name: {
+                let val = file.file_name().unwrap();
+                let val = val.to_os_string().into_string().unwrap();
+                let val = val.chars().filter_map(|c| if c.is_alphanumeric() || c == '_' { Some(c) } else if c == '.' { Some('_') } else { None }).collect::<String>();
+                val.to_ascii_uppercase()
+            },
+            struct_name_no_ext: {
+                let val = file.file_stem().unwrap();
+                let val = val.to_os_string().into_string().unwrap();
+                let val = val.chars().filter_map(|c| if c.is_alphanumeric() || c == '_' { Some(c) } else if c == '.' { Some('_') } else { None }).collect::<String>();
+                val.to_ascii_uppercase()
+            },
+            resource_str_name: file.display().to_string(),
+            resource_str_name_no_ext: if file.iter().count() == 1 {
+                file.file_stem().unwrap().to_os_string().into_string().unwrap()
+            } else {
+                file.parent().unwrap().display().to_string() + "/" + &file.file_stem().unwrap().to_os_string().into_string().unwrap()
+            },
+            file_path: base_dir.join(file).display().to_string(),
+            enum_name: path_to_enum_variant(file),
+        }
+    }).collect::<Vec<_>>();
 
     let file_path = env::var("OUT_DIR").unwrap();
     let file_path = Path::new(&file_path).join("pocket-resources.rs");
     let mut file = File::create(&file_path).unwrap();
-    try!(writeln!(file.by_ref(), r#"
-        {en}
 
-        impl Resource {{
-            pub fn from_name(name: &str) -> Option<Resource> {{
-                {if_clause} {{
-                    None
-                }}
-            }}
+    try!(writeln!(file, r#"pub enum ResourceId {{"#));
+    for entry in &entries { try!(writeln!(file, r"{},", entry.enum_name)); }
+    try!(writeln!(file, r#"}}"#));
 
-            pub fn load(&self) -> &'static [u8] {{
-                match self {{
-                    {load_clause}
-                }}
-            }}
-        }}
-    "#, en = enum_output, if_clause = if_clause, load_clause = load_clause));
+    try!(writeln!(file, r#"impl ResourceId {{"#));
+    try!(writeln!(file, r#"    #[inline]"#));
+    try!(writeln!(file, r#"    pub fn load(&self) -> &'static [u8] {{"#));
+    try!(writeln!(file, r#"        match self {{"#));
+    for entry in &entries {
+        try!(writeln!(file, r##"
+                &ResourceId::{} => &include_bytes!(r#"{}/{}"#)[..],
+            "##, entry.enum_name, env::var("CARGO_MANIFEST_DIR").unwrap(), entry.file_path));
+    }
+    try!(writeln!(file, r#"        }}"#));
+    try!(writeln!(file, r#"    }}"#));
+    try!(writeln!(file, r#"    #[inline]"#));
+    try!(writeln!(file, r#"    pub fn from_name(name: &str) -> Option<ResourceId> {{"#));
+    for entry in &entries {
+        try!(writeln!(file, r##"
+                if name == r#"{}"# {{ return Some(ResourceId::{}); }}
+            "##, entry.resource_str_name, entry.enum_name));
 
+        if entry.resource_str_name != entry.resource_str_name_no_ext {
+            if entries.iter().filter(|e| e.resource_str_name_no_ext == entry.resource_str_name_no_ext || e.resource_str_name == entry.resource_str_name_no_ext).count() == 1 {
+            try!(writeln!(file, r##"
+                    if name == r#"{}"# {{ return Some(ResourceId::{}); }}
+                "##, entry.resource_str_name_no_ext, entry.enum_name));
+            }
+        }
+    }
+    try!(writeln!(file, r#"        None"#));
+    try!(writeln!(file, r#"    }}"#));
+    try!(writeln!(file, r#"}}"#));
+
+    try!(write(&entries, &[], &mut file));
     Ok(())
 }
 
-fn visit_dirs<P, C>(dir: P, mut cb: &mut C) -> io::Result<()>
-                    where P: AsRef<Path>, C: FnMut(fs::DirEntry)
+fn write<W>(entries: &[Entry], base: &[String], output: &mut W) -> io::Result<()>
+    where W: Write
 {
-    let dir = dir.as_ref();
+    let mut sub_paths = HashSet::new();
 
-    if try!(fs::metadata(dir)).is_dir() {
-        for entry in try!(fs::read_dir(dir)) {
-            let entry = try!(entry);
-            if try!(fs::metadata(entry.path())).is_dir() {
-                try!(visit_dirs(&entry.path(), cb));
-            } else {
-                cb(entry);
+    for entry in entries {
+        if entry.path.len() > base.len() && &entry.path[..base.len()] == base {
+            sub_paths.insert(&entry.path[base.len()]);
+        }
+
+        if entry.path != base {
+            continue;
+        }
+
+        try!(write!(output, "#[allow(missing_docs)] pub const {}: ", entry.struct_name));
+        for _ in 0 .. base.len() { try!(write!(output, r"super::")); }
+        try!(write!(output, "ResourceId = "));
+        for _ in 0 .. base.len() { try!(write!(output, r"super::")); }
+        try!(writeln!(output, r"ResourceId::{};", entry.enum_name));
+
+        if entry.struct_name != entry.struct_name_no_ext {
+            if entries.iter().filter(|e| e.struct_name_no_ext == entry.struct_name_no_ext || e.struct_name == entry.struct_name_no_ext).count() == 1 {
+                try!(write!(output, "#[allow(missing_docs)] pub const {}: ", entry.struct_name_no_ext));
+                for _ in 0 .. base.len() { try!(write!(output, r"super::")); }
+                try!(write!(output, "ResourceId = "));
+                for _ in 0 .. base.len() { try!(write!(output, r"super::")); }
+                try!(writeln!(output, r"ResourceId::{};", entry.enum_name));
             }
         }
     }
 
+    for sub_path in sub_paths.iter() {
+        try!(writeln!(output, r#"
+            #[allow(missing_docs)]
+            pub mod {} {{
+        "#, sub_path));
+
+        let mut base = base.to_vec();
+        base.push(sub_path.to_string());
+        try!(write(entries, &base, output));
+
+        try!(writeln!(output, r#"
+            }}
+        "#));
+    }
+    
     Ok(())
 }
 
 /// Turns a path into a variant name for the enumeration of resources.
-fn path_to_enum_variant<P>(path: P, remove_extensions: bool) -> String where P: AsRef<Path> {
+fn path_to_enum_variant<P>(path: P) -> String where P: AsRef<Path> {
     let path = path.as_ref();
 
-    let components = path.parent().into_iter().flat_map(|p| p.iter())
-                         .chain(if remove_extensions {
-                             path.file_stem().into_iter()
-                         } else {
-                             path.file_name().into_iter()
-                         })
+    let components = path.iter()
                          .map(|val| {
                              let val = val.to_str().expect("Cannot process non-UTF8 path");
                              let val = val.chars().filter(|c| c.is_alphanumeric()).collect::<String>();
@@ -105,50 +158,4 @@ fn path_to_enum_variant<P>(path: P, remove_extensions: bool) -> String where P: 
                          }).collect::<Vec<_>>();
 
     components.concat()
-}
-
-/// Turns a path into a resource name usable by the program.
-fn path_to_resource_name<P>(path: P, remove_extensions: bool) -> String where P: AsRef<Path> {
-    let path = path.as_ref();
-
-    path.parent()
-        .into_iter()
-        .flat_map(|p| p.components().map(|component| {
-            match component {
-                Component::Prefix(_) => unreachable!(),
-                Component::RootDir => unreachable!(),
-                Component::CurDir => unreachable!(),
-                Component::ParentDir => unreachable!(),
-                Component::Normal(s) => s.to_str().expect("Cannot process non-UTF8 path"),
-            }
-        }))
-        .chain(if remove_extensions {
-            path.file_stem().map(|v| v.to_str().unwrap()).into_iter()
-        } else {
-            path.file_name().map(|v| v.to_str().unwrap()).into_iter()
-        })
-        .collect::<Vec<_>>()
-        .connect("/")
-}
-
-pub fn relative_from<'a, P: ?Sized + AsRef<Path>>(path: &'a Path, base: &'a P) -> Option<&'a Path>
-{
-    fn iter_after<A, I, J>(mut iter: I, mut prefix: J) -> Option<I> where
-        I: Iterator<Item=A> + Clone, J: Iterator<Item=A>, A: PartialEq
-    {
-        loop {
-            let mut iter_next = iter.clone();
-            match (iter_next.next(), prefix.next()) {
-                (Some(x), Some(y)) => {
-                    if x != y { return None }
-                }
-                (Some(_), None) => return Some(iter),
-                (None, None) => return Some(iter),
-                (None, Some(_)) => return None,
-            }
-            iter = iter_next;
-        }
-    }
-
-    iter_after(path.components(), base.as_ref().components()).map(|c| c.as_path())
 }

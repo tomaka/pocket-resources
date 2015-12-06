@@ -1,6 +1,6 @@
 [package]
 name = "pocket-resources"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 description = "Include resources in your applications."
 keywords = ["resources"]
@@ -10,4 +10,3 @@ repository = "https://github.com/tomaka/pocket-resources"
 [lib]
 name = "pocket_resources"
 path = "src/lib.rs"
-crate-type = ["dylib"]
