@@ -76,6 +76,16 @@ pub fn package<'a, I, P1, P2>(files: I) -> io::Result<()>
     try!(writeln!(file, r#"        }}"#));
     try!(writeln!(file, r#"    }}"#));
     try!(writeln!(file, r#"    #[inline]"#));
+    try!(writeln!(file, r#"    pub fn name_ext(&self) -> &str {{"#));
+    try!(writeln!(file, r#"        match *self {{"#));
+    for entry in &entries {
+        try!(writeln!(file, r##"
+                ResourceId::{} => r#"{}"#,
+            "##, entry.enum_name, entry.resource_str_name));
+    }
+    try!(writeln!(file, r#"        }}"#));
+    try!(writeln!(file, r#"    }}"#));
+    try!(writeln!(file, r#"    #[inline]"#));
     try!(writeln!(file, r#"    pub fn from_name(name: &str) -> Option<ResourceId> {{"#));
     for entry in &entries {
         try!(writeln!(file, r##"
