@@ -21,7 +21,7 @@ Create a `build.rs` file:
 extern crate pocket_resources;
 
 fn main() {
-    pocket_resources::package(&["resources"]).unwrap();
+    pocket_resources::package(&[("resources","path/to/image.png")]).unwrap();
 }
 ```
 
@@ -36,11 +36,11 @@ This creates a public enum named `Resource`. If you want to name it something el
 You can then load the resource directly from the enum:
 
 ```rust
-let data: &[u8] = Resource::PathToImagePng.load();
+let data: &[u8] = ResourceId::PathToImagepng.load();
 ```
 
 Or load it at runtime:
 
 ```rust
-let data: &[u8] = Resource::from_name("path/to/image.png").unwrap().load();
+let data: &[u8] = ResourceId::from_name("path/to/image.png").unwrap().load();
 ```
